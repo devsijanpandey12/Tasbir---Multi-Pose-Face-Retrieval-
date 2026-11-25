@@ -47,17 +47,28 @@ flowchart LR
 
 ### Matching Formulation
 
-Given $L_2$-normalized reference embeddings $\mathcal{T} = \{\mathbf{e}_{\text{left}}, \mathbf{e}_{\text{front}}, \mathbf{e}_{\text{right}}, \mathbf{e}_{\text{mean}}\}$ and an indexed face embedding $\mathbf{f} \in \mathbb{R}^{512}$:
+Given $L_2$-normalized reference embeddings and an indexed face embedding $\mathbf{f} \in \mathbb{R}^{512}$:
 
-- **Pass 1 (Max-Over-Templates Cosine Similarity):**
-  $$S_{\text{face}}(\mathbf{f}) = \max_{k \in \mathcal{T}} (\mathbf{f} \cdot \mathbf{e}_k) \ge \tau \quad (\text{default } \tau = 0.42)$$
-- **Pass 2 (In-Event Outfit Recovery for borderline/occluded faces):**
-  High-confidence Pass-1 anchors ($S_{\text{face}} \ge 0.50$) define an event-specific face anchor and torso descriptor. Borderline faces ($0.25 \le S_{\text{face}} < \tau$) are rescored via:
-  $$S_{\text{combined}} = 0.65 \cdot S_{\text{face\_event}} + 0.35 \cdot S_{\text{outfit}}$$
+```math
+\mathcal{T} = \lbrace \mathbf{e}_{\text{left}},\; \mathbf{e}_{\text{front}},\; \mathbf{e}_{\text{right}},\; \mathbf{e}_{\text{mean}} \rbrace
+```
+
+**Pass 1 — Max-Over-Templates Cosine Similarity** (default $\tau = 0.42$):
+
+```math
+S_{\text{face}}(\mathbf{f}) = \max_{k \in \mathcal{T}} (\mathbf{f} \cdot \mathbf{e}_k) \ge \tau
+```
+
+**Pass 2 — In-Event Outfit Recovery (for borderline or occluded faces):**  
+High-confidence Pass-1 anchors ($S_{\text{face}} \ge 0.50$) define an event-specific face anchor and torso descriptor. Borderline faces ($0.25 \le S_{\text{face}} < \tau$) are rescored via:
+
+```math
+S_{\text{combined}} = 0.65 \cdot S_{\text{event}} + 0.35 \cdot S_{\text{outfit}}
+```
 
 ---
 
-## Technical Evolution (Reaco 2024 $\rightarrow$ Tasbir 2026)
+## Technical Evolution (Reaco 2024 → Tasbir 2026)
 
 | Component | Original 2024 Proposal (`Reaco`) | 2026 Implementation (`Tasbir`) |
 | :--- | :--- | :--- |
