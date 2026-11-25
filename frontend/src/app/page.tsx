@@ -223,8 +223,7 @@ export default function HomePage() {
       </main>
 
       <footer className="border-t border-zinc-900/90 py-3.5 text-center font-mono text-[11px] text-zinc-600">
-        Tasbir Local Engine · SCRFD-10G + ArcFace 512-D ONNX · Multi-Pose Max-Cosine &
-        Two-Pass Outfit Re-ID
+        Tasbir · Hosted on Microsoft Azure Container Apps · SCRFD-10G + ArcFace 512-D ONNX
       </footer>
 
       <TechStackModal

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { Cpu, Database, ExternalLink, Layers, Monitor, X } from "lucide-react";
+import { Cloud, Cpu, Database, ExternalLink, Layers, Monitor, X } from "lucide-react";
 import { HealthResponse } from "@/lib/api";
 
 const REPO_URL =
@@ -79,6 +79,26 @@ const STACK_SECTIONS = [
       {
         name: "WebRTC (getUserMedia + MediaRecorder)",
         role: "In-browser guided 3-angle webcam capture and 4.5s head-turn video recording",
+      },
+    ],
+  },
+  {
+    title: "Cloud Hosting (Microsoft Azure)",
+    icon: Cloud,
+    accent: "text-violet-300",
+    ring: "border-violet-400/20 bg-violet-400/5",
+    items: [
+      {
+        name: "Azure Container Apps (eastasia)",
+        role: "Scale-to-zero HTTPS containers running tasbir-web (Next.js) and tasbir-api (FastAPI + ONNX)",
+      },
+      {
+        name: "Azure Container Registry & Docker",
+        role: "Multi-stage Docker builds with pre-baked SCRFD-10G and ArcFace ONNX weights",
+      },
+      {
+        name: "Azure Files Persistent Volume",
+        role: "Mounted at /app/data so indexed photos, WebP thumbnails, and face vectors persist across restarts",
       },
     ],
   },
