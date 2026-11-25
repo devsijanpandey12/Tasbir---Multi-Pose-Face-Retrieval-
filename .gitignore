@@ -1,0 +1,21 @@
+# Python
+backend/.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+
+# Local data & cached ONNX weights
+data/
+models/
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.env
+.env.local
