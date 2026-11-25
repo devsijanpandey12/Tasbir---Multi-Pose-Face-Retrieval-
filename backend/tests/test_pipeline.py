@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.config import Settings
-from app.db import FACE_DIM, OUTFIT_DIM, FaceRecord, PhotoPoolStore
+from app.db import FACE_DIM, OUTFIT_DIM, FaceRecord, PhotoPoolStore, SessionStoreManager
 from app.main import create_app
 from app.matcher import MultiAngleQueryTemplate, ReferencePose, match_pool
 from app.vision import VisionPipeline, compute_blur_score, compute_torso_descriptor, estimate_yaw
@@ -224,25 +224,33 @@ def test_onnx_models_load_and_api_endpoints(tmp_path: Path) -> None:
     assert raw_norm > 0.0
     assert abs(float(np.linalg.norm(emb)) - 1.0) < 1e-4
 
-    # Verify FastAPI endpoints with isolated temporary store
-    store = PhotoPoolStore(
-        db_path=cfg.db_path,
-        embeddings_path=cfg.embeddings_path,
-        outfit_embeddings_path=cfg.outfit_embeddings_path,
+    # Verify FastAPI endpoints with isolated ephemeral session manager
+    session_mgr = SessionStoreManager(
+        sessions_root=cfg.sessions_dir,
+        ttl_seconds=60,
     )
-    app = create_app(custom_store=store, custom_vision=vision, custom_settings=cfg)
+    app = create_app(
+        custom_session_manager=session_mgr,
+        custom_vision=vision,
+        custom_settings=cfg,
+    )
+
+    sess_a = {"X-Session-Id": "session_alpha_12345"}
+    sess_b = {"X-Session-Id": "session_beta_67890"}
 
     with TestClient(app) as client:
-        r_health = client.get("/api/health")
+        r_health = client.get("/api/health", headers=sess_a)
         assert r_health.status_code == 200
         body = r_health.json()
         assert body["status"] == "ok"
+        assert body["ephemeral"] is True
         assert body["stats"]["total_photos"] == 0
 
-        # Upload a synthetic blank photo (0 faces) -> indexed cleanly + deduplicated on re-upload
+        # Upload a synthetic blank photo into session A -> isolated from session B
         img_bytes = _make_jpeg_bytes()
         r_up = client.post(
             "/api/pool/upload",
+            headers=sess_a,
             files=[("files", ("blank.jpg", img_bytes, "image/jpeg"))],
         )
         assert r_up.status_code == 200
@@ -251,27 +259,47 @@ def test_onnx_models_load_and_api_endpoints(tmp_path: Path) -> None:
         assert up_data["items"][0]["status"] == "indexed"
         photo_id = up_data["items"][0]["photo_id"]
 
+        # Session B must start completely empty (cannot see Session A's photos)
+        r_pool_b = client.get("/api/pool", headers=sess_b)
+        assert r_pool_b.status_code == 200
+        assert r_pool_b.json()["stats"]["total_photos"] == 0
+        assert r_pool_b.json()["photos"] == []
+
+        # Duplicate upload in same session A is deduplicated
         r_dup = client.post(
             "/api/pool/upload",
+            headers=sess_a,
             files=[("files", ("blank.jpg", img_bytes, "image/jpeg"))],
         )
         assert r_dup.status_code == 200
         assert r_dup.json()["duplicate_count"] == 1
 
-        # ZIP download returns a valid zip containing the photo
-        r_zip = client.post("/api/download-zip", json={"photo_ids": [photo_id]})
+        # ZIP download works for Session A and returns 404 for Session B
+        r_zip = client.post(
+            "/api/download-zip", headers=sess_a, json={"photo_ids": [photo_id]}
+        )
         assert r_zip.status_code == 200
         assert r_zip.headers["content-type"] == "application/zip"
+
+        r_zip_b = client.post(
+            "/api/download-zip", headers=sess_b, json={"photo_ids": [photo_id]}
+        )
+        assert r_zip_b.status_code == 404
 
         # Matching with a blank reference returns 422 cleanly (no face detected)
         r_match = client.post(
             "/api/match/photos",
+            headers=sess_a,
             files=[("files", ("no_face.jpg", img_bytes, "image/jpeg"))],
             data={"threshold": "0.42", "enable_pass2": "true"},
         )
         assert r_match.status_code == 422
 
-        # Delete photo
-        r_del = client.delete(f"/api/pool/{photo_id}")
-        assert r_del.status_code == 200
-        assert r_del.json()["stats"]["total_photos"] == 0
+        # Cleanup endpoint (used by sendBeacon on tab close) wipes session A completely
+        r_clean = client.post(
+            "/api/session/cleanup?session_id=session_alpha_12345"
+        )
+        assert r_clean.status_code == 200
+        assert r_clean.json()["cleaned"] is True
+        assert client.get("/api/pool", headers=sess_a).json()["stats"]["total_photos"] == 0
+        assert not (cfg.sessions_dir / "session_alpha_12345").exists()

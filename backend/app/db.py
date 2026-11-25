@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import sqlite3
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +19,7 @@ import numpy as np
 
 FACE_DIM = 512
 OUTFIT_DIM = 96
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
 @dataclass
@@ -430,3 +434,124 @@ class PhotoPoolStore:
             pose_label=str(row["pose_label"]),
             vector_index=int(row["vector_index"]),
         )
+
+
+@dataclass
+class EphemeralSession:
+    session_id: str
+    root_dir: Path
+    originals_dir: Path
+    thumbs_dir: Path
+    store: PhotoPoolStore
+    last_accessed: float
+
+
+class SessionStoreManager:
+    """
+    Manages isolated, ephemeral per-session photo pools so every browser visit starts
+    empty and uploaded photos are automatically purged on tab close or after TTL expiry.
+    """
+
+    def __init__(
+        self,
+        sessions_root: Path,
+        *,
+        ttl_seconds: int = 1800,
+        nolock: bool = False,
+    ) -> None:
+        self.sessions_root = sessions_root
+        self.ttl_seconds = max(60, int(ttl_seconds))
+        self.nolock = nolock
+        self._lock = threading.RLock()
+        self._sessions: dict[str, EphemeralSession] = {}
+        self.sessions_root.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def validate_session_id(session_id: str) -> str:
+        sid = session_id.strip()
+        if not SESSION_ID_RE.match(sid):
+            raise ValueError("Invalid session_id format.")
+        return sid
+
+    def get_or_create(self, session_id: str) -> EphemeralSession:
+        sid = self.validate_session_id(session_id)
+        now = time.monotonic()
+        with self._lock:
+            existing = self._sessions.get(sid)
+            if existing is not None:
+                existing.last_accessed = now
+                return existing
+
+            s_dir = self.sessions_root / sid
+            orig_dir = s_dir / "originals"
+            thumb_dir = s_dir / "thumbs"
+            orig_dir.mkdir(parents=True, exist_ok=True)
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+
+            store = PhotoPoolStore(
+                db_path=s_dir / "tasbir.db",
+                embeddings_path=s_dir / "embeddings.npy",
+                outfit_embeddings_path=s_dir / "outfit_embeddings.npy",
+                nolock=self.nolock,
+            )
+            sess = EphemeralSession(
+                session_id=sid,
+                root_dir=s_dir,
+                originals_dir=orig_dir,
+                thumbs_dir=thumb_dir,
+                store=store,
+                last_accessed=now,
+            )
+            self._sessions[sid] = sess
+            return sess
+
+    def get_existing(self, session_id: str) -> EphemeralSession | None:
+        sid = self.validate_session_id(session_id)
+        with self._lock:
+            sess = self._sessions.get(sid)
+            if sess is not None:
+                sess.last_accessed = time.monotonic()
+            return sess
+
+    def delete_session(self, session_id: str) -> bool:
+        try:
+            sid = self.validate_session_id(session_id)
+        except ValueError:
+            return False
+
+        with self._lock:
+            sess = self._sessions.pop(sid, None)
+            target_dir = sess.root_dir if sess is not None else (self.sessions_root / sid)
+            existed = sess is not None or target_dir.exists()
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+            return existed
+
+    def cleanup_expired(self, *, now: float | None = None) -> int:
+        check_time = time.monotonic() if now is None else now
+        expired_ids: list[str] = []
+        with self._lock:
+            for sid, sess in self._sessions.items():
+                if (check_time - sess.last_accessed) >= self.ttl_seconds:
+                    expired_ids.append(sid)
+            for sid in expired_ids:
+                sess = self._sessions.pop(sid, None)
+                if sess is not None and sess.root_dir.exists():
+                    shutil.rmtree(sess.root_dir, ignore_errors=True)
+        return len(expired_ids)
+
+    def clear_all_sessions(self) -> None:
+        with self._lock:
+            self._sessions.clear()
+            if self.sessions_root.exists():
+                for child in self.sessions_root.iterdir():
+                    if child.is_dir():
+                        shutil.rmtree(child, ignore_errors=True)
+                    else:
+                        child.unlink(missing_ok=True)
+            self.sessions_root.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def active_session_count(self) -> int:
+        with self._lock:
+            return len(self._sessions)

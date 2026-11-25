@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     # Set True when mounting SQLite on SMB/CIFS shares (e.g. Azure Files) with single replica
     sqlite_nolock: bool = False
 
+    # Ephemeral session TTL (minutes of inactivity before auto-deletion)
+    session_ttl_minutes: int = 30
+
+    @property
+    def sessions_dir(self) -> Path:
+        return self.data_dir / "sessions"
+
     @property
     def cors_origin_list(self) -> list[str]:
         raw = self.cors_origins.strip()
@@ -95,8 +102,7 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.originals_dir.mkdir(parents=True, exist_ok=True)
-        self.thumbs_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
 

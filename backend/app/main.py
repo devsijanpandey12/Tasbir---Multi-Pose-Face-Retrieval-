@@ -1,30 +1,31 @@
-"""FastAPI application for Tasbir — Multi-Angle Event & Group Photo Finder."""
+"""FastAPI application for Tasbir — Ephemeral Multi-Angle Event & Group Photo Finder."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import time
 import uuid
 import zipfile
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings, settings
-from .db import PhotoPoolStore, PhotoRecord
+from .db import FACE_DIM, PhotoPoolStore, PhotoRecord, SessionStoreManager
 from .matcher import MatchExecutionReport, MultiAngleQueryTemplate, match_pool
 from .vision import VisionPipeline, save_original_and_thumb
 
 
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 ALLOWED_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
+DEFAULT_FALLBACK_SESSION = "default_session"
 
 
 # --- Pydantic Response Schemas ---
@@ -111,17 +112,32 @@ class ZipDownloadRequest(BaseModel):
     photo_ids: list[str] = Field(..., min_length=1, max_length=500)
 
 
-# --- App Factory ---
+# --- Helpers ---
 
 
-def _photo_to_out(rec: PhotoRecord) -> PhotoOut:
+def _empty_stats() -> dict[str, int]:
+    return {"total_photos": 0, "total_faces": 0, "embedding_dim": FACE_DIM}
+
+
+def _resolve_session_id(
+    x_session_id: str | None = None,
+    query_session_id: str | None = None,
+) -> str:
+    raw = (x_session_id or query_session_id or DEFAULT_FALLBACK_SESSION).strip()
+    try:
+        return SessionStoreManager.validate_session_id(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _photo_to_out(rec: PhotoRecord, session_id: str) -> PhotoOut:
     thumb_name = Path(rec.thumb_path).name
     orig_name = Path(rec.file_path).name
     return PhotoOut(
         id=rec.id,
         filename=rec.filename,
-        thumb_url=f"/media/thumbs/{thumb_name}",
-        original_url=f"/media/originals/{orig_name}",
+        thumb_url=f"/media/{session_id}/thumbs/{thumb_name}",
+        original_url=f"/media/{session_id}/originals/{orig_name}",
         width=rec.width,
         height=rec.height,
         face_count=rec.face_count,
@@ -143,9 +159,10 @@ def _photo_to_out(rec: PhotoRecord) -> PhotoOut:
 
 def _build_match_response(
     *,
+    session_id: str,
     query: MultiAngleQueryTemplate,
     report: MatchExecutionReport,
-    store: PhotoPoolStore,
+    store: PhotoPoolStore | None,
     threshold: float,
     enable_pass2: bool,
     extraction_ms: float,
@@ -153,7 +170,7 @@ def _build_match_response(
     video_meta: dict[str, Any] | None = None,
 ) -> MatchResponse:
     matched_ids = [m.photo_id for m in report.matches]
-    photos_map = store.get_photos_by_ids(matched_ids)
+    photos_map = store.get_photos_by_ids(matched_ids) if store is not None else {}
 
     match_items: list[MatchedPhotoOut] = []
     for m in report.matches:
@@ -162,7 +179,7 @@ def _build_match_response(
             continue
         match_items.append(
             MatchedPhotoOut(
-                photo=_photo_to_out(photo),
+                photo=_photo_to_out(photo, session_id),
                 score=round(m.score, 4),
                 face_score=round(m.face_score, 4),
                 outfit_score=round(m.outfit_score, 4) if m.outfit_score is not None else None,
@@ -201,26 +218,42 @@ def _build_match_response(
     )
 
 
+# --- App Factory ---
+
+
 def create_app(
-    custom_store: PhotoPoolStore | None = None,
+    custom_session_manager: SessionStoreManager | None = None,
     custom_vision: VisionPipeline | None = None,
     custom_settings: Settings | None = None,
 ) -> FastAPI:
     cfg = custom_settings or settings
     cfg.ensure_dirs()
-    store = custom_store or PhotoPoolStore(
-        db_path=cfg.db_path,
-        embeddings_path=cfg.embeddings_path,
-        outfit_embeddings_path=cfg.outfit_embeddings_path,
+    session_mgr = custom_session_manager or SessionStoreManager(
+        sessions_root=cfg.sessions_dir,
+        ttl_seconds=cfg.session_ttl_minutes * 60,
         nolock=cfg.sqlite_nolock,
     )
     vision = custom_vision or VisionPipeline(cfg)
 
+    async def _reap_expired_loop() -> None:
+        while True:
+            await asyncio.sleep(60)
+            session_mgr.cleanup_expired()
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         cfg.ensure_dirs()
+        # Start every server boot with a clean ephemeral slate
+        session_mgr.clear_all_sessions()
         vision.load()
-        yield
+        reaper = asyncio.create_task(_reap_expired_loop())
+        try:
+            yield
+        finally:
+            reaper.cancel()
+            with suppress(asyncio.CancelledError):
+                await reaper
+            session_mgr.clear_all_sessions()
 
     app = FastAPI(
         title=cfg.app_name,
@@ -236,25 +269,44 @@ def create_app(
         allow_headers=["*"],
     )
 
-    # Serve stored originals and thumbnails
-    app.mount(
-        "/media/originals",
-        StaticFiles(directory=str(cfg.originals_dir)),
-        name="originals",
-    )
-    app.mount(
-        "/media/thumbs",
-        StaticFiles(directory=str(cfg.thumbs_dir)),
-        name="thumbs",
-    )
+    @app.get("/media/{session_id}/{kind}/{filename}")
+    def serve_session_media(session_id: str, kind: str, filename: str) -> FileResponse:
+        if kind not in {"originals", "thumbs"}:
+            raise HTTPException(status_code=404, detail="Invalid media folder.")
+        if Path(filename).name != filename or ".." in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename.")
+
+        sid = _resolve_session_id(query_session_id=session_id)
+        sess = session_mgr.get_existing(sid)
+        if sess is None:
+            raise HTTPException(status_code=404, detail="Session expired or not found.")
+
+        base_dir = sess.originals_dir if kind == "originals" else sess.thumbs_dir
+        target = base_dir / filename
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="Media file not found.")
+
+        return FileResponse(
+            target,
+            headers={"Cache-Control": "no-store, private"},
+        )
 
     @app.get("/api/health")
-    def health() -> dict[str, Any]:
+    def health(
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
         vision.load()
+        session_mgr.cleanup_expired()
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
+        stats = sess.store.get_stats() if sess is not None else _empty_stats()
         return {
             "status": "ok",
             "app": cfg.app_name,
             "version": cfg.app_version,
+            "ephemeral": True,
+            "session_ttl_minutes": cfg.session_ttl_minutes,
             "models": {
                 "detector": "SCRFD-10G (det_10g.onnx)",
                 "embedder": "ArcFace ResNet-50 WebFace600K (w600k_r50.onnx)",
@@ -268,19 +320,40 @@ def create_app(
                 "max_reference_photos": cfg.max_reference_photos,
                 "default_threshold": cfg.default_threshold,
             },
-            "stats": store.get_stats(),
+            "stats": stats,
         }
 
+    @app.post("/api/session/cleanup")
+    def cleanup_session(
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        """Immediately wipe an ephemeral session (called via navigator.sendBeacon on unload)."""
+        sid = _resolve_session_id(x_session_id, session_id)
+        cleaned = session_mgr.delete_session(sid)
+        return {"cleaned": cleaned, "session_id": sid}
+
     @app.get("/api/pool")
-    def list_pool() -> dict[str, Any]:
-        photos = store.list_photos()
+    def list_pool(
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
+        if sess is None:
+            return {"stats": _empty_stats(), "photos": []}
+        photos = sess.store.list_photos()
         return {
-            "stats": store.get_stats(),
-            "photos": [_photo_to_out(p) for p in photos],
+            "stats": sess.store.get_stats(),
+            "photos": [_photo_to_out(p, sid) for p in photos],
         }
 
     @app.post("/api/pool/upload", response_model=PoolUploadResponse)
-    async def upload_pool(files: list[UploadFile] = File(...)) -> PoolUploadResponse:
+    async def upload_pool(
+        files: list[UploadFile] = File(...),
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> PoolUploadResponse:
         if not files:
             raise HTTPException(status_code=400, detail="No files provided.")
         if len(files) > cfg.max_pool_batch:
@@ -288,6 +361,10 @@ def create_app(
                 status_code=400,
                 detail=f"Batch exceeds limit of {cfg.max_pool_batch} photos per upload.",
             )
+
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_or_create(sid)
+        store = sess.store
 
         t0 = time.perf_counter()
         max_bytes = cfg.max_photo_size_mb * 1024 * 1024
@@ -341,14 +418,14 @@ def create_app(
                         filename=fname,
                         status="duplicate",
                         photo_id=existing_id,
-                        message="Already indexed in photo pool.",
+                        message="Already indexed in this session.",
                     )
                 )
                 continue
 
             photo_id = str(uuid.uuid4())
-            orig_path = cfg.originals_dir / f"{photo_id}.jpg"
-            thumb_path = cfg.thumbs_dir / f"{photo_id}.webp"
+            orig_path = sess.originals_dir / f"{photo_id}.jpg"
+            thumb_path = sess.thumbs_dir / f"{photo_id}.webp"
 
             try:
                 bgr, width, height = save_original_and_thumb(
@@ -415,22 +492,38 @@ def create_app(
         )
 
     @app.delete("/api/pool/{photo_id}")
-    def delete_pool_photo(photo_id: str) -> dict[str, Any]:
-        removed = store.delete_photo(photo_id)
+    def delete_pool_photo(
+        photo_id: str,
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
+        if sess is None:
+            raise HTTPException(status_code=404, detail="Photo not found.")
+        removed = sess.store.delete_photo(photo_id)
         if removed is None:
             raise HTTPException(status_code=404, detail="Photo not found.")
         orig_path, thumb_path = removed
         Path(orig_path).unlink(missing_ok=True)
         Path(thumb_path).unlink(missing_ok=True)
-        return {"deleted": photo_id, "stats": store.get_stats()}
+        return {"deleted": photo_id, "stats": sess.store.get_stats()}
 
     @app.delete("/api/pool")
-    def clear_pool() -> dict[str, Any]:
-        removed = store.clear_all()
+    def clear_pool(
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
+        if sess is None:
+            return {"cleared_count": 0, "stats": _empty_stats()}
+        removed = sess.store.clear_all()
         for orig_path, thumb_path in removed:
             Path(orig_path).unlink(missing_ok=True)
             Path(thumb_path).unlink(missing_ok=True)
-        return {"cleared_count": len(removed), "stats": store.get_stats()}
+        session_mgr.delete_session(sid)
+        return {"cleared_count": len(removed), "stats": _empty_stats()}
 
     @app.post("/api/match/photos", response_model=MatchResponse)
     async def match_by_photos(
@@ -438,6 +531,8 @@ def create_app(
         angles: list[str] | None = Form(default=None),
         threshold: float = Form(default=cfg.default_threshold),
         enable_pass2: bool = Form(default=True),
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
     ) -> MatchResponse:
         if not files:
             raise HTTPException(status_code=400, detail="Upload at least 1 reference photo.")
@@ -446,6 +541,9 @@ def create_app(
                 status_code=400,
                 detail=f"Upload at most {cfg.max_reference_photos} reference photos.",
             )
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
+
         threshold = max(0.15, min(0.85, float(threshold)))
         max_bytes = cfg.max_photo_size_mb * 1024 * 1024
 
@@ -470,7 +568,26 @@ def create_app(
                 detail="No usable face detected in the uploaded reference photos. Please upload clear face photos.",
             )
 
-        face_records, face_embeddings, outfit_embeddings = store.get_search_snapshot()
+        if sess is None:
+            empty_report = MatchExecutionReport(
+                matches=[],
+                search_ms=0.0,
+                total_faces_searched=0,
+                pass1_count=0,
+                pass2_recovered_count=0,
+            )
+            return _build_match_response(
+                session_id=sid,
+                query=query,
+                report=empty_report,
+                store=None,
+                threshold=threshold,
+                enable_pass2=enable_pass2,
+                extraction_ms=extraction_ms,
+                skipped_references=skipped,
+            )
+
+        face_records, face_embeddings, outfit_embeddings = sess.store.get_search_snapshot()
         report = match_pool(
             query,
             face_records,
@@ -484,9 +601,10 @@ def create_app(
             pass2_combined_threshold=cfg.pass2_combined_threshold,
         )
         return _build_match_response(
+            session_id=sid,
             query=query,
             report=report,
-            store=store,
+            store=sess.store,
             threshold=threshold,
             enable_pass2=enable_pass2,
             extraction_ms=extraction_ms,
@@ -498,6 +616,8 @@ def create_app(
         video: UploadFile = File(...),
         threshold: float = Form(default=cfg.default_threshold),
         enable_pass2: bool = Form(default=True),
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
     ) -> MatchResponse:
         fname = video.filename or "head_turn.webm"
         ext = Path(fname).suffix.lower()
@@ -515,7 +635,10 @@ def create_app(
                 detail=f"Video must be between 1 B and {cfg.max_video_size_mb} MB.",
             )
 
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
         threshold = max(0.15, min(0.85, float(threshold)))
+
         t_ext = time.perf_counter()
         try:
             query, video_meta = vision.build_reference_from_video(raw, filename=fname)
@@ -529,7 +652,26 @@ def create_app(
                 detail="No usable face frames found in the uploaded video. Try better lighting and face the camera.",
             )
 
-        face_records, face_embeddings, outfit_embeddings = store.get_search_snapshot()
+        if sess is None:
+            empty_report = MatchExecutionReport(
+                matches=[],
+                search_ms=0.0,
+                total_faces_searched=0,
+                pass1_count=0,
+                pass2_recovered_count=0,
+            )
+            return _build_match_response(
+                session_id=sid,
+                query=query,
+                report=empty_report,
+                store=None,
+                threshold=threshold,
+                enable_pass2=enable_pass2,
+                extraction_ms=extraction_ms,
+                video_meta=video_meta,
+            )
+
+        face_records, face_embeddings, outfit_embeddings = sess.store.get_search_snapshot()
         report = match_pool(
             query,
             face_records,
@@ -543,9 +685,10 @@ def create_app(
             pass2_combined_threshold=cfg.pass2_combined_threshold,
         )
         return _build_match_response(
+            session_id=sid,
             query=query,
             report=report,
-            store=store,
+            store=sess.store,
             threshold=threshold,
             enable_pass2=enable_pass2,
             extraction_ms=extraction_ms,
@@ -553,8 +696,16 @@ def create_app(
         )
 
     @app.post("/api/download-zip")
-    def download_zip(payload: ZipDownloadRequest) -> StreamingResponse:
-        photos_map = store.get_photos_by_ids(payload.photo_ids)
+    def download_zip(
+        payload: ZipDownloadRequest,
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        session_id: str | None = Query(default=None),
+    ) -> StreamingResponse:
+        sid = _resolve_session_id(x_session_id, session_id)
+        sess = session_mgr.get_existing(sid)
+        if sess is None:
+            raise HTTPException(status_code=404, detail="Session not found.")
+        photos_map = sess.store.get_photos_by_ids(payload.photo_ids)
         if not photos_map:
             raise HTTPException(status_code=404, detail="No matching photos found to download.")
 

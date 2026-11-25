@@ -2,8 +2,9 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TASBIR_DATA_DIR=/app/data \
-    TASBIR_MODELS_DIR=/app/models/buffalo_l
+    TASBIR_DATA_DIR=/tmp/tasbir_data \
+    TASBIR_MODELS_DIR=/app/models/buffalo_l \
+    TASBIR_SESSION_TTL_MINUTES=30
 
 WORKDIR /app
 
@@ -24,7 +25,7 @@ COPY app /app/app
 # so cold starts on Azure Container Apps take ~2s instead of downloading at startup
 RUN python -c "from app.vision import VisionPipeline; vp = VisionPipeline(); vp.ensure_models_downloaded()"
 
-RUN mkdir -p /app/data/originals /app/data/thumbs
+RUN mkdir -p /tmp/tasbir_data/sessions
 
 EXPOSE 8000
 
