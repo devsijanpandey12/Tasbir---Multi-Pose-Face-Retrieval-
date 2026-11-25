@@ -24,6 +24,16 @@ Powered by a pure-ONNX **SCRFD-10G** detector, 5-point similarity alignment, **A
 
 ---
 
+## UI Preview
+
+### 1. Photo Pool (Bulk Upload & Indexing)
+![Photo Pool UI](docs/screenshots/photo-pool.png)
+
+### 2. Find My Photos (3-Angle / Webcam / Video Matching)
+![Find My Photos UI](docs/screenshots/find-my-photos.png)
+
+---
+
 ## System Pipeline
 
 ```mermaid
@@ -169,7 +179,8 @@ $env:PYTHONPATH="."
 ├── README.md                          # Project overview, architecture & quickstart
 ├── start.ps1                          # One-command local launcher (backend + frontend)
 ├── docs/
-│   └── STUDY_GUIDE.md                 # CV concepts, interview notes & paper references
+│   ├── STUDY_GUIDE.md                 # CV concepts, interview notes & paper references
+│   └── screenshots/                   # UI screenshots embedded in README
 ├── backend/
 │   ├── app/
 │   │   ├── config.py                  # Storage paths, upload guardrails & thresholds
