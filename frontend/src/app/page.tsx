@@ -15,6 +15,7 @@ import {
   API_BASE,
   HealthResponse,
   PhotoOut,
+  cleanupCurrentSession,
   fetchHealth,
   fetchPool,
 } from "@/lib/api";
@@ -52,7 +53,15 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    void loadData(true);
+    void loadData(false);
+
+    const onLeave = () => cleanupCurrentSession();
+    window.addEventListener("pagehide", onLeave);
+    window.addEventListener("beforeunload", onLeave);
+    return () => {
+      window.removeEventListener("pagehide", onLeave);
+      window.removeEventListener("beforeunload", onLeave);
+    };
   }, [loadData]);
 
   const totalPhotos = health?.stats.total_photos ?? photos.length;

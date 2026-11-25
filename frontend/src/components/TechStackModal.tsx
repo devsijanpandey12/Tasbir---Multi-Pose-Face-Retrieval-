@@ -97,8 +97,8 @@ const STACK_SECTIONS = [
         role: "Multi-stage Docker builds with pre-baked SCRFD-10G and ArcFace ONNX weights",
       },
       {
-        name: "Azure Files Persistent Volume",
-        role: "Mounted at /app/data so indexed photos, WebP thumbnails, and face vectors persist across restarts",
+        name: "Ephemeral Per-Session Isolation",
+        role: "Isolated in-container sessions auto-purged on tab close (sendBeacon) or after 30 min idle",
       },
     ],
   },

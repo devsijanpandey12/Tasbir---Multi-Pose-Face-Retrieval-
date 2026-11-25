@@ -162,7 +162,7 @@ export default function PoolPanel({
               Select Group Photos
             </button>
             <span className="font-mono text-[11px] text-zinc-500">
-              Up to {maxBatch} photos/batch · ≤ {maxPhotoMb} MB each · Auto-deduplicated
+              Up to {maxBatch} photos/batch · ≤ {maxPhotoMb} MB each · Private session (auto-clears on exit)
             </span>
           </div>
         </div>

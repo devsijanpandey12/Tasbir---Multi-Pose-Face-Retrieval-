@@ -1,6 +1,45 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+function generateSessionId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID().replace(/-/g, "");
+  }
+  return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+// Memory-only per-visit session ID: every fresh tab or page reload starts clean
+let _sessionId: string | null = null;
+
+export function getSessionId(): string {
+  if (_sessionId === null) {
+    _sessionId = generateSessionId();
+  }
+  return _sessionId;
+}
+
+function sessionHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    "X-Session-Id": getSessionId(),
+    ...(extra ?? {}),
+  };
+}
+
+export function cleanupCurrentSession(): void {
+  if (!_sessionId || typeof window === "undefined") return;
+  const url = `${API_BASE}/api/session/cleanup?session_id=${encodeURIComponent(_sessionId)}`;
+  try {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+      // Plain text Blob keeps the request a CORS simple request (no preflight on tab close)
+      navigator.sendBeacon(url, new Blob(["cleanup"], { type: "text/plain" }));
+      return;
+    }
+  } catch {
+    // Fallback below
+  }
+  fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+}
+
 export function mediaUrl(path: string): string {
   if (!path) return "";
   if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("data:")) {
@@ -138,12 +177,18 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}/api/health`, {
+    cache: "no-store",
+    headers: sessionHeaders(),
+  });
   return handleResponse<HealthResponse>(res);
 }
 
 export async function fetchPool(): Promise<PoolListResponse> {
-  const res = await fetch(`${API_BASE}/api/pool`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}/api/pool`, {
+    cache: "no-store",
+    headers: sessionHeaders(),
+  });
   return handleResponse<PoolListResponse>(res);
 }
 
@@ -154,6 +199,7 @@ export async function uploadPoolPhotos(files: File[]): Promise<PoolUploadRespons
   }
   const res = await fetch(`${API_BASE}/api/pool/upload`, {
     method: "POST",
+    headers: sessionHeaders(),
     body: form,
   });
   return handleResponse<PoolUploadResponse>(res);
@@ -162,6 +208,7 @@ export async function uploadPoolPhotos(files: File[]): Promise<PoolUploadRespons
 export async function deletePoolPhoto(photoId: string): Promise<{ deleted: string; stats: PoolStats }> {
   const res = await fetch(`${API_BASE}/api/pool/${encodeURIComponent(photoId)}`, {
     method: "DELETE",
+    headers: sessionHeaders(),
   });
   return handleResponse(res);
 }
@@ -169,6 +216,7 @@ export async function deletePoolPhoto(photoId: string): Promise<{ deleted: strin
 export async function clearPool(): Promise<{ cleared_count: number; stats: PoolStats }> {
   const res = await fetch(`${API_BASE}/api/pool`, {
     method: "DELETE",
+    headers: sessionHeaders(),
   });
   return handleResponse(res);
 }
@@ -193,6 +241,7 @@ export async function matchByPhotos(
 
   const res = await fetch(`${API_BASE}/api/match/photos`, {
     method: "POST",
+    headers: sessionHeaders(),
     body: form,
   });
   return handleResponse<MatchResponse>(res);
@@ -210,6 +259,7 @@ export async function matchByVideo(
 
   const res = await fetch(`${API_BASE}/api/match/video`, {
     method: "POST",
+    headers: sessionHeaders(),
     body: form,
   });
   return handleResponse<MatchResponse>(res);
@@ -218,7 +268,7 @@ export async function matchByVideo(
 export async function downloadMatchedZip(photoIds: string[]): Promise<void> {
   const res = await fetch(`${API_BASE}/api/download-zip`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: sessionHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ photo_ids: photoIds }),
   });
   if (!res.ok) {
