@@ -1,7 +1,5 @@
 # Tasbir — Computer Vision & Tech Stack Study Guide
 
-> Reference notes covering the core Computer Vision concepts, design decisions, and papers behind **Tasbir**, useful for deep-dive reviews and technical interviews.
-
 ---
 
 ## 1. Five Core AI / Computer Vision Concepts
