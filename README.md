@@ -45,7 +45,8 @@ Powered by a pure-ONNX **SCRFD-10G** detector, 5-point similarity alignment, **A
   - Upload a **3–12s head-turn video** (`.mp4`, `.webm`, `.mov`) with automated 5-point yaw estimation and Laplacian sharpness frame selection.
 - **Multi-Pose Template Bank (`Max-Cosine`):** Stores individual pose vectors plus their normalized centroid so candid side-profile photos match strongly without frontal averaging washout.
 - **Two-Pass Outfit & Occlusion Recovery:** Uses high-confidence Pass-1 matches from the same event to build an in-event face + torso outfit anchor, recovering partially occluded or sunglasses shots in Pass 2.
-- **Production Cloud & Gallery UX:** Deployed on Microsoft Azure with persistent **Azure Files** storage, EXIF auto-orientation, SHA-256 duplicate protection, `1600px` in-memory detection scaling, `480px` WebP thumbnails, full-resolution lightbox with SCRFD bounding-box overlays, and one-click `.zip` export.
+- **Privacy-First Ephemeral Sessions:** Every browser visit runs in an isolated, temporary session—uploaded photos are never shared with other visitors, auto-delete immediately when you close or reload the tab (`sendBeacon`), and automatically expire after 30 minutes of inactivity.
+- **Production Cloud & Gallery UX:** Deployed on Microsoft Azure Container Apps with EXIF auto-orientation, SHA-256 duplicate protection, `1600px` in-memory detection scaling, `480px` WebP thumbnails, full-resolution lightbox with SCRFD bounding-box overlays, and one-click `.zip` export.
 
 ---
 
@@ -111,7 +112,7 @@ S_{\text{combined}} = 0.65 \cdot S_{\text{event}} + 0.35 \cdot S_{\text{outfit}}
 
 ## Cloud Implementation (Microsoft Azure)
 
-Tasbir is fully containerized and deployed on **Microsoft Azure** (`rg-tasbir`, region `eastasia`) using a serverless scale-to-zero architecture designed for fast cold starts, persistent photo/vector storage, and near-zero idle cost.
+Tasbir is fully containerized and deployed on **Microsoft Azure** (`rg-tasbir`, region `eastasia`) using a privacy-first, serverless scale-to-zero architecture designed for fast cold starts, automatic session cleanup, and near-zero idle cost.
 
 ```mermaid
 flowchart TD
@@ -122,34 +123,34 @@ flowchart TD
         ACR["Azure Container Registry - Pre-baked ONNX and Next.js Images"]
         Web["Azure Container App: tasbir-web - Next.js 15 (0.5 vCPU, 1 GiB, min 0 / max 1)"]
         API["Azure Container App: tasbir-api - FastAPI + ONNX (2 vCPU, 4 GiB, min 0 / max 1)"]
-        Files[("Azure Storage Account - Azure Files SMB Share mounted at /app/data")]
+        Tmp[("Ephemeral Per-Session Store (/tmp/tasbir_data/sessions) - Auto-Purged")]
 
         ACR -.->|"Pulls container images"| Web
         ACR -.->|"Pulls container images"| API
-        API <-->|"Reads & Writes Originals, WebP Thumbs, SQLite, .npy"| Files
+        API <-->|"Isolated UUID Sessions + 30m TTL Reaper"| Tmp
     end
 
     User <-->|"Managed TLS (HTTPS)"| Web
-    User <-->|"Managed TLS (HTTPS) + Strict CORS"| API
+    User <-->|"HTTPS + X-Session-Id + sendBeacon Cleanup"| API
 ```
 
 ### Deployed Azure Resource Topology
 
 | Resource | Service & SKU | Configuration & Purpose |
 | :--- | :--- | :--- |
-| **Compute Environment** | `Azure Container Apps` (`WorkloadProfiles` Consumption) | Serverless container hosting with managed HTTPS ingress, Log Analytics, and Azure Files volume support |
-| **Frontend Service (`tasbir-web`)** | Container App (`0.5 vCPU`, `1.0 GiB`, `min 0 / max 1`) | Multi-stage `node:20-alpine` image (`output: "standalone"`), built with `NEXT_PUBLIC_API_URL` targeting the live API |
+| **Compute Environment** | `Azure Container Apps` (`WorkloadProfiles` Consumption) | Serverless container hosting with managed HTTPS ingress and Log Analytics |
+| **Frontend Service (`tasbir-web`)** | Container App (`0.5 vCPU`, `1.0 GiB`, `min 0 / max 1`) | Multi-stage `node:20-alpine` image (`output: "standalone"`), generating a fresh in-memory UUID session per visit |
 | **Backend Service (`tasbir-api`)** | Container App (`2.0 vCPU`, `4.0 GiB`, `min 0 / max 1`) | `python:3.11-slim` image with `SCRFD-10G` + `ArcFace` ONNX models pre-baked at build time for `<1s` startup |
 | **Container Registry** | `Azure Container Registry` (`Basic`) | Stores versioned `linux/amd64` Docker images built locally and pushed via [`deploy-azure.ps1`](deploy-azure.ps1) |
-| **Persistent Storage** | `Azure Storage` (`Standard_LRS`) + `Azure Files` (`5 GiB`) | Mounted at `/app/data` on `tasbir-api` so uploaded photos, WebP thumbnails, SQLite DB, and `.npy` vectors persist across restarts |
+| **Session Storage** | In-container ephemeral volume (`/tmp/tasbir_data`) | Strictly isolated per-session folders wiped on tab close (`POST /api/session/cleanup`), 30-min TTL expiry, or scale-to-zero |
 
 ### Key Cloud Engineering Details
 
 - **Pre-Baked ONNX Weights for Fast Cold Starts:** Both `det_10g.onnx` (`SCRFD-10G`, 16.9 MB) and `w600k_r50.onnx` (`ArcFace ResNet-50`, 174 MB) are downloaded during `backend/Dockerfile` build rather than at container boot—eliminating startup download latency so Uvicorn starts in under 1 second.
-- **SQLite Persistence over Azure Files (SMB/CIFS):** Azure Files SMB mounts reject POSIX `fcntl` byte-range locks used by default SQLite journaling (`OperationalError: database is locked`). In cloud mode (`TASBIR_SQLITE_NOLOCK=true`), `PhotoPoolStore` opens SQLite with URI `?nolock=1` and `PRAGMA journal_mode = MEMORY`, while serializing all writes through an in-process `threading.RLock` paired with `max-replicas: 1`. Embedding arrays (`.npy`) are persisted via temp-file atomic `replace`.
+- **Privacy-First Ephemeral Sessions:** Each browser visit creates a memory-only UUID (`X-Session-Id`) with zero `localStorage` persistence. Reopening or refreshing the link always starts with a clean, empty pool. On `pagehide`/`beforeunload`, the browser fires `navigator.sendBeacon` to `POST /api/session/cleanup` to immediately purge photos, thumbnails, SQLite rows, and `.npy` vectors; a background asyncio reaper also deletes inactive sessions after 30 minutes.
 - **Automatic HTTPS & WebRTC Unlock:** Azure Container Apps provisions managed TLS certificates automatically, enabling browser `getUserMedia` / `MediaRecorder` webcam capture on both desktop and mobile devices.
-- **Strict Cross-Origin Security:** `tasbir-api` dynamically parses `TASBIR_CORS_ORIGINS` (supporting comma-separated origins or JSON arrays) so only the deployed `tasbir-web` HTTPS origin (and local dev) can call the API.
-- **Repeatable Infrastructure Script:** All provisioning, Docker `linux/amd64` builds, ACR pushes, Azure Files volume YAML mounts, and CORS wiring are scripted in [`deploy-azure.ps1`](deploy-azure.ps1).
+- **Strict Cross-Origin & Media Privacy:** `tasbir-api` locks `TASBIR_CORS_ORIGINS` strictly to the deployed `tasbir-web` HTTPS origin and serves session media under unguessable session paths with `Cache-Control: no-store, private`.
+- **Repeatable Infrastructure Script:** All provisioning, Docker `linux/amd64` builds, ACR pushes, and CORS wiring are scripted in [`deploy-azure.ps1`](deploy-azure.ps1).
 
 ---
 
@@ -242,6 +243,7 @@ Provisions `Azure Container Registry`, `Azure Files` persistent storage (`/app/d
 | `POST /api/match/photos` | Matches 1–5 reference photos with configurable `threshold` and `enable_pass2` |
 | `POST /api/match/video` | Extracts sharpest Left/Front/Right frames from a head-turn video and runs matching |
 | `POST /api/download-zip` | Streams a `.zip` archive of full-resolution originals for matched `photo_ids` |
+| `POST /api/session/cleanup` | Immediately deletes an ephemeral session's files and vectors (called on tab close) |
 
 ---
 

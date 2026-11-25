@@ -105,7 +105,7 @@ if (-not $apiExists) {
         --memory 4.0Gi `
         --min-replicas 0 `
         --max-replicas 1 `
-        --env-vars "TASBIR_DATA_DIR=/app/data" "TASBIR_MODELS_DIR=/app/models/buffalo_l" "TASBIR_SQLITE_NOLOCK=true" `
+        --env-vars "TASBIR_DATA_DIR=/tmp/tasbir_data" "TASBIR_MODELS_DIR=/app/models/buffalo_l" "TASBIR_SESSION_TTL_MINUTES=30" `
         --output none
 } else {
     az containerapp update `
