@@ -27,22 +27,38 @@ Powered by a pure-ONNX **SCRFD-10G** detector, 5-point similarity alignment, **A
 ## System Pipeline
 
 ```mermaid
-flowchart LR
-    subgraph Pool["1. Index Photo Pool (Once)"]
-        P["Group / Event Photos"] --> Pre["EXIF Fix + Max 1600px Resize + WebP Thumb"]
-        Pre --> Det1["SCRFD-10G Detection + 5-Point Align (112x112)"]
-        Det1 --> Emb1["ArcFace 512-D + 96-D Torso Descriptor"]
-        Emb1 --> DB["SQLite Metadata + L2-Normalized NumPy Index"]
+flowchart TD
+    subgraph Pool["1. Photo Pool Indexing (Run Once)"]
+        direction TB
+        P["Group / Event Photos"]
+        Pre["EXIF Orient + 1600px Resize + WebP Thumb"]
+        Det1["SCRFD-10G Detection + 5-Point Align (112x112)"]
+        Emb1["ArcFace 512-D + 96-D Torso Descriptor"]
+        DB[("SQLite Metadata + NumPy Vector Store")]
+
+        P --> Pre --> Det1 --> Emb1 --> DB
     end
 
-    subgraph Query["2. Multi-Angle Query"]
-        Ref["3 Reference Angles OR Head-Turn Video"] --> Det2["SCRFD-10G + Yaw Binning + Laplacian Blur Gate"]
-        Det2 --> Bank["Template Bank: Left, Front, Right, Mean"]
-        Bank --> P1["Pass 1: Max-Cosine Search"]
-        DB --> P1
-        P1 --> P2["Pass 2: In-Event Outfit Occlusion Recovery"]
-        P2 --> Out["Ranked Gallery + Bounding Boxes + ZIP Export"]
+    subgraph Query["2. Multi-Angle User Query"]
+        direction TB
+        Ref["3 Reference Photos OR Head-Turn Video"]
+        Det2["SCRFD-10G + Yaw Binning + Blur Filter"]
+        Bank["Template Bank: Left, Front, Right, Mean"]
+
+        Ref --> Det2 --> Bank
     end
+
+    subgraph Match["3. Two-Pass Retrieval"]
+        direction TB
+        P1["Pass 1: Max-Cosine Similarity"]
+        P2["Pass 2: In-Event Outfit Occlusion Recovery"]
+        Out["Ranked Gallery + Face Boxes + ZIP Export"]
+
+        P1 --> P2 --> Out
+    end
+
+    DB --> P1
+    Bank --> P1
 ```
 
 ### Matching Formulation
@@ -68,15 +84,14 @@ S_{\text{combined}} = 0.65 \cdot S_{\text{event}} + 0.35 \cdot S_{\text{outfit}}
 
 ---
 
-## Technical Evolution (Reaco 2024 → Tasbir 2026)
+## Tech Stack
 
-| Component | Original 2024 Proposal (`Reaco`) | 2026 Implementation (`Tasbir`) |
-| :--- | :--- | :--- |
-| **Detection & Alignment** | YOLOv8m + Dlib 68 landmarks | **SCRFD-10G (`det_10g.onnx`)** joint box + 5-point similarity alignment |
-| **Face Embeddings** | Custom InceptionV3 Siamese (Triplet Loss, `128x128`) | Pre-trained **ArcFace ResNet-50 (`w600k_r50.onnx`, `512-D`)** |
-| **Matching Engine** | Per-user KNN / SVM retraining | **Multi-Pose Max-Cosine** dot product + **Two-Pass Outfit Re-ID** |
-| **Inference Runtime** | TensorFlow / Keras | Pure **ONNX Runtime** (no C++/Cython build requirements) |
-| **Interface & Storage** | Flutter + raw images in MongoDB | **Next.js 15 + FastAPI** + local originals/WebP thumbs + SQLite/NumPy |
+| Layer | Technologies |
+| :--- | :--- |
+| **AI & Computer Vision** | `ONNX Runtime`, `SCRFD-10G` (`det_10g.onnx`), `ArcFace ResNet-50` (`w600k_r50.onnx`, 512-D), `OpenCV`, `NumPy`, `Pillow` |
+| **Backend API** | `Python 3.11+`, `FastAPI`, `Uvicorn`, `Pydantic v2` |
+| **Frontend Web App** | `Next.js 15` (App Router), `React 19`, `TypeScript`, `Tailwind CSS v4`, `WebRTC` (`getUserMedia` / `MediaRecorder`), `Lucide Icons` |
+| **Storage & Testing** | `SQLite`, atomic `.npy` vector persistence, `Pytest`, `HTTPX` |
 
 ---
 
@@ -182,3 +197,9 @@ $env:PYTHONPATH="."
 
 - **Deep-Dive Notes & Papers:** See [docs/STUDY_GUIDE.md](docs/STUDY_GUIDE.md) for mathematical intuition behind `SCRFD`, `ArcFace`, `AdaFace`, yaw binning, and occlusion handling.
 - **Cloud Production Path (Phase 2):** Swap local SQLite + `.npy` for **PostgreSQL + `pgvector` (HNSW)**, replace local media directories with **Azure Blob Storage** (SAS URLs) + **Azure Storage Queues**, and deploy containerized FastAPI/ONNX workers on **Azure Container Apps** with the frontend on **Azure Static Web Apps**.
+
+---
+
+## Author
+
+Made by **Sijan Pandey** — [GitHub Repository](https://github.com/devsijanpandey12/Tasbir---Multi-Pose-Face-Retrieval-)
