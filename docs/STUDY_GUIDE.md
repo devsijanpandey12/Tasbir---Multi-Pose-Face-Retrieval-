@@ -57,9 +57,9 @@ S_{\text{combined}} = 0.65 \cdot S_{\text{event}} + 0.35 \cdot S_{\text{outfit}}
 - **`FastAPI` + `Uvicorn`:** Async multipart uploads, Pydantic schemas, static media mounting, and streaming `.zip` archives.
 - **`Next.js 15` (React + TypeScript) + `Tailwind CSS`:** Responsive UI, WebRTC `getUserMedia` / `MediaRecorder` webcam capture, and normalized bounding-box overlays.
 
-### Cloud Scale-Up Stack (Phase 2)
-- **`PostgreSQL` + `pgvector` (HNSW):** Replace local SQLite + `.npy` matrices when scaling past ~50,000 faces across multi-tenant event rooms.
-- **`Docker` & `Microsoft Azure`:** Deploy FastAPI + ONNX workers to **Azure Container Apps**, Next.js to **Azure Static Web Apps**, high-res images to **Azure Blob Storage** (emulated locally via **Azurite**), and bulk jobs to **Azure Storage Queues**.
+### Cloud Deployment & Scale-Up Stack
+- **Live Hosting (`Docker` & `Microsoft Azure`):** Containerized FastAPI (`tasbir-api`) and Next.js (`tasbir-web`) deployed to **Azure Container Apps** (`eastasia`, scale-to-zero Consumption), stored in **Azure Container Registry**, with persistent **Azure Files** mounted at `/app/data`.
+- **Future High-Scale Path (`PostgreSQL` + `pgvector` + `Azure Blob Storage`):** Swap SQLite + `.npy` for HNSW vector indexing and Azure Storage Queues once scaling past ~50,000 indexed faces across multi-tenant events.
 
 ---
 
