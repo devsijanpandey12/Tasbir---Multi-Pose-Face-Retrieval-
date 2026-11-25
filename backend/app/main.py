@@ -212,6 +212,7 @@ def create_app(
         db_path=cfg.db_path,
         embeddings_path=cfg.embeddings_path,
         outfit_embeddings_path=cfg.outfit_embeddings_path,
+        nolock=cfg.sqlite_nolock,
     )
     vision = custom_vision or VisionPipeline(cfg)
 
@@ -229,7 +230,7 @@ def create_app(
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cfg.cors_origins,
+        allow_origins=cfg.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

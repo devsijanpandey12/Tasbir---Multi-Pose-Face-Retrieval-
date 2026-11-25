@@ -53,10 +53,13 @@ class PhotoPoolStore:
         db_path: Path,
         embeddings_path: Path,
         outfit_embeddings_path: Path,
+        *,
+        nolock: bool = False,
     ) -> None:
         self.db_path = db_path
         self.embeddings_path = embeddings_path
         self.outfit_embeddings_path = outfit_embeddings_path
+        self.nolock = nolock
         self._lock = threading.RLock()
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,9 +71,24 @@ class PhotoPoolStore:
         self._verify_index_integrity()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        if self.nolock:
+            uri_path = self.db_path.resolve().as_posix()
+            conn = sqlite3.connect(
+                f"file:{uri_path}?nolock=1",
+                uri=True,
+                timeout=30.0,
+                check_same_thread=False,
+            )
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("PRAGMA journal_mode = MEMORY;")
+            return conn
+
+        conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA journal_mode = DELETE;")
+        conn.execute("PRAGMA busy_timeout = 30000;")
         return conn
 
     def _init_schema(self) -> None:

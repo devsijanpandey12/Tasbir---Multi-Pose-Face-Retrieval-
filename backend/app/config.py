@@ -1,6 +1,8 @@
 """Centralized configuration and upload guardrails for Tasbir."""
 
+import json
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,11 +45,25 @@ class Settings(BaseSettings):
     pass2_min_outfit_score: float = 0.55
     pass2_combined_threshold: float = 0.44
 
-    # CORS
-    cors_origins: list[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
+    # CORS (comma-separated URLs or JSON list via TASBIR_CORS_ORIGINS)
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    # Set True when mounting SQLite on SMB/CIFS shares (e.g. Azure Files) with single replica
+    sqlite_nolock: bool = False
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        raw = self.cors_origins.strip()
+        if not raw:
+            return ["http://localhost:3000"]
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(o).strip().rstrip("/") for o in parsed if str(o).strip()]
+            except json.JSONDecodeError:
+                pass
+        return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
 
     @property
     def originals_dir(self) -> Path:

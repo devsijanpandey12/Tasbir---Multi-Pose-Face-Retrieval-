@@ -12,6 +12,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import {
+  API_BASE,
   HealthResponse,
   PhotoOut,
   fetchHealth,
@@ -183,9 +184,9 @@ export default function HomePage() {
               <span>
                 Cannot reach FastAPI backend at{" "}
                 <code className="rounded bg-black/40 px-1.5 py-0.5 font-mono">
-                  http://localhost:8000
+                  {API_BASE}
                 </code>
-                . Make sure the backend server is running.
+                . If hosted on Azure scale-to-zero, wait a few seconds and click Retry.
               </span>
             </div>
             <button
