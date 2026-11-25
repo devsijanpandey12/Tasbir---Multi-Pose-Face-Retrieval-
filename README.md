@@ -4,6 +4,11 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)
 ![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-SCRFD--10G_%2B_ArcFace-5C2D91)
+![Azure Container Apps](https://img.shields.io/badge/Azure-Container_Apps-0078D4?logo=microsoftazure&logoColor=white)
+
+> **Live Demo (Microsoft Azure):** https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io  
+> **Live API Docs (Swagger):** https://tasbir-api.kindbush-f7946e21.eastasia.azurecontainerapps.io/docs  
+> *(Note: hosted on scale-to-zero Azure Container Apps — first request after idle takes ~10–15 seconds to cold-start.)*
 
 **Tasbir** is a zero-training, full-stack Computer Vision web application that retrieves every photo containing a specific person from large event or wedding albums using **multi-angle reference selfies (Left, Front, Right)** or a **short head-turn video**.
 
@@ -101,7 +106,7 @@ S_{\text{combined}} = 0.65 \cdot S_{\text{event}} + 0.35 \cdot S_{\text{outfit}}
 | **AI & Computer Vision** | `ONNX Runtime`, `SCRFD-10G` (`det_10g.onnx`), `ArcFace ResNet-50` (`w600k_r50.onnx`, 512-D), `OpenCV`, `NumPy`, `Pillow` |
 | **Backend API** | `Python 3.11+`, `FastAPI`, `Uvicorn`, `Pydantic v2` |
 | **Frontend Web App** | `Next.js 15` (App Router), `React 19`, `TypeScript`, `Tailwind CSS v4`, `WebRTC` (`getUserMedia` / `MediaRecorder`), `Lucide Icons` |
-| **Storage & Testing** | `SQLite`, atomic `.npy` vector persistence, `Pytest`, `HTTPX` |
+| **Storage & Cloud** | `SQLite`, atomic `.npy` vectors, `Docker`, `Azure Container Apps`, `Azure Container Registry`, `Azure Files`, `Pytest` |
 
 ---
 
@@ -156,6 +161,19 @@ $env:PYTHONPATH="."
 .\.venv\Scripts\pytest.exe -v tests/test_pipeline.py
 ```
 
+### 4. Run with Docker Compose or Deploy to Azure
+
+**Local Docker Compose:**
+```powershell
+docker compose up --build
+```
+
+**Deploy / Redeploy to Microsoft Azure Container Apps (`eastasia`):**
+```powershell
+.\deploy-azure.ps1
+```
+Provisions `Azure Container Registry`, `Azure Files` persistent storage (`/app/data`), and scale-to-zero `tasbir-api` + `tasbir-web` Container Apps with automatic HTTPS and CORS wiring.
+
 ---
 
 ## REST API Reference
@@ -178,6 +196,8 @@ $env:PYTHONPATH="."
 .
 ├── README.md                          # Project overview, architecture & quickstart
 ├── start.ps1                          # One-command local launcher (backend + frontend)
+├── deploy-azure.ps1                   # One-command Azure Container Apps deploy script
+├── docker-compose.yml                 # Local full-stack Docker Compose setup
 ├── docs/
 │   ├── STUDY_GUIDE.md                 # CV concepts, interview notes & paper references
 │   └── screenshots/                   # UI screenshots embedded in README
