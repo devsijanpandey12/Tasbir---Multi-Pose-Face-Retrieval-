@@ -1,8 +1,5 @@
 # Tasbir — Multi-Pose Event & Group Photo Retrieval
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-Hosted_on_Azure-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io)
-[![API Docs](https://img.shields.io/badge/API_Docs-Swagger_UI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://tasbir-api.kindbush-f7946e21.eastasia.azurecontainerapps.io/docs)
-
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)
@@ -10,26 +7,32 @@
 ![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)
 ![Azure Container Apps](https://img.shields.io/badge/Hosted_on-Azure_Container_Apps-0078D4?logo=microsoftazure&logoColor=white)
 
+> [!TIP]
+> ### Try Tasbir Live — Hosted on Microsoft Azure
+> [![Launch Live Web App](https://img.shields.io/badge/%F0%9F%9A%80_LAUNCH_LIVE_WEB_APP-Try_It_Now_on_Azure-F59E0B?style=for-the-badge)](https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io)
+> [![Swagger API Docs](https://img.shields.io/badge/API_Docs-Swagger_UI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://tasbir-api.kindbush-f7946e21.eastasia.azurecontainerapps.io/docs)
+>
+> **Direct Link:** **https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io**  
+> *(Runs on scale-to-zero Azure Container Apps with automatic HTTPS so WebRTC live webcam capture works on mobile and desktop. First load after idle takes ~10–15 seconds to wake up.)*
+
 **Tasbir** is a zero-training, full-stack Computer Vision web application—**live and hosted on Microsoft Azure**—that retrieves every photo containing a specific person from large event or group photo collections using **multi-angle reference selfies (Left, Front, Right)** or a **short head-turn video**.
 
 Powered by a pure-ONNX **SCRFD-10G** detector, 5-point similarity alignment, **ArcFace ResNet-50 (WebFace600K)** 512-D embeddings, **Multi-Pose Max-Cosine matching**, and **Two-Pass In-Event Outfit Re-ID** for occlusion recovery.
 
 ---
 
-## Try It Live (Hosted on Microsoft Azure)
+## UI Preview
 
-Tasbir is publicly deployed on **Microsoft Azure Container Apps** (`eastasia`) with automatic HTTPS (so in-browser WebRTC webcam capture works on both desktop and mobile browsers):
+### 1. Photo Pool (Bulk Upload & Indexing)
+![Photo Pool UI](docs/screenshots/photo-pool.png)
 
-| Service | Live Public URL |
-| :--- | :--- |
-| **Web Application** | **[https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io](https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io)** |
-| **FastAPI Backend** | `https://tasbir-api.kindbush-f7946e21.eastasia.azurecontainerapps.io` |
-| **Interactive Swagger Docs** | **[https://tasbir-api.kindbush-f7946e21.eastasia.azurecontainerapps.io/docs](https://tasbir-api.kindbush-f7946e21.eastasia.azurecontainerapps.io/docs)** |
+### 2. Find My Photos (3-Angle / Webcam / Video Matching)
+![Find My Photos UI](docs/screenshots/find-my-photos.png)
 
-**Quick walkthrough to test live:**
-1. Open the **[Live Web App](https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io)** *(both containers scale to zero when idle, so the very first load may take ~10–15 seconds to wake up)*.
-2. On **1. Photo Pool**, upload a few group or event photos to detect and index all faces.
-3. Switch to **2. Find My Photos**, upload 1–3 angles of one person (or use **Live Cam** / **Video**), and click **Find My Photos** to view ranked matches with bounding-box highlights and one-click `.zip` download.
+**How to try it out in 30 seconds:**
+1. Open **[Tasbir Live on Azure](https://tasbir-web.kindbush-f7946e21.eastasia.azurecontainerapps.io)**.
+2. On **1. Photo Pool**, drag and drop a batch of group or event photos to detect and index all faces.
+3. Switch to **2. Find My Photos**, upload 1–3 angles of one person (or use **Live Cam** / **Video**), and click **Find My Photos** to view ranked matches with bounding-box overlays and one-click `.zip` download.
 
 ---
 
@@ -43,16 +46,6 @@ Tasbir is publicly deployed on **Microsoft Azure Container Apps** (`eastasia`) w
 - **Multi-Pose Template Bank (`Max-Cosine`):** Stores individual pose vectors plus their normalized centroid so candid side-profile photos match strongly without frontal averaging washout.
 - **Two-Pass Outfit & Occlusion Recovery:** Uses high-confidence Pass-1 matches from the same event to build an in-event face + torso outfit anchor, recovering partially occluded or sunglasses shots in Pass 2.
 - **Production Cloud & Gallery UX:** Deployed on Microsoft Azure with persistent **Azure Files** storage, EXIF auto-orientation, SHA-256 duplicate protection, `1600px` in-memory detection scaling, `480px` WebP thumbnails, full-resolution lightbox with SCRFD bounding-box overlays, and one-click `.zip` export.
-
----
-
-## UI Preview
-
-### 1. Photo Pool (Bulk Upload & Indexing)
-![Photo Pool UI](docs/screenshots/photo-pool.png)
-
-### 2. Find My Photos (3-Angle / Webcam / Video Matching)
-![Find My Photos UI](docs/screenshots/find-my-photos.png)
 
 ---
 
@@ -116,9 +109,9 @@ S_{\text{combined}} = 0.65 \cdot S_{\text{event}} + 0.35 \cdot S_{\text{outfit}}
 
 ---
 
-## Cloud Architecture (Microsoft Azure)
+## Cloud Implementation (Microsoft Azure)
 
-Tasbir is containerized with Docker and hosted on **Microsoft Azure** (`eastasia`):
+Tasbir is fully containerized and deployed on **Microsoft Azure** (`rg-tasbir`, region `eastasia`) using a serverless scale-to-zero architecture designed for fast cold starts, persistent photo/vector storage, and near-zero idle cost.
 
 ```mermaid
 flowchart TD
@@ -127,22 +120,36 @@ flowchart TD
     subgraph Azure["Microsoft Azure - rg-tasbir (eastasia)"]
         direction TB
         ACR["Azure Container Registry - Pre-baked ONNX and Next.js Images"]
-        Web["Azure Container App: tasbir-web - Next.js 15 (0.5 vCPU, 1 GiB, Scale-to-Zero)"]
-        API["Azure Container App: tasbir-api - FastAPI + ONNX (2 vCPU, 4 GiB, Scale-to-Zero)"]
-        Files[("Azure Storage Account - Azure Files Share mounted at /app/data")]
+        Web["Azure Container App: tasbir-web - Next.js 15 (0.5 vCPU, 1 GiB, min 0 / max 1)"]
+        API["Azure Container App: tasbir-api - FastAPI + ONNX (2 vCPU, 4 GiB, min 0 / max 1)"]
+        Files[("Azure Storage Account - Azure Files SMB Share mounted at /app/data")]
 
-        ACR -.->|"Pulls image"| Web
-        ACR -.->|"Pulls image"| API
-        API <-->|"Persists Photos, WebP Thumbs, SQLite, .npy"| Files
+        ACR -.->|"Pulls container images"| Web
+        ACR -.->|"Pulls container images"| API
+        API <-->|"Reads & Writes Originals, WebP Thumbs, SQLite, .npy"| Files
     end
 
-    User <-->|"HTTPS"| Web
-    User <-->|"HTTPS + CORS"| API
+    User <-->|"Managed TLS (HTTPS)"| Web
+    User <-->|"Managed TLS (HTTPS) + Strict CORS"| API
 ```
 
-- **Fast Cold Starts:** Official `det_10g.onnx` (`SCRFD-10G`) and `w600k_r50.onnx` (`ArcFace ResNet-50`) weights are pre-baked into the `tasbir-api` Docker image so startup completes in under 1 second after container wake.
-- **Persistent Storage:** An **Azure Files** share (`5 GiB`) is mounted at `/app/data` on a `WorkloadProfiles` Consumption environment so uploaded photos, WebP thumbnails, SQLite metadata (`TASBIR_SQLITE_NOLOCK=true`), and `.npy` embedding matrices survive restarts and scale-to-zero.
-- **Cost-Efficient Scale-to-Zero:** Both `tasbir-web` and `tasbir-api` run with `min-replicas: 0`, consuming zero compute billing while idle.
+### Deployed Azure Resource Topology
+
+| Resource | Service & SKU | Configuration & Purpose |
+| :--- | :--- | :--- |
+| **Compute Environment** | `Azure Container Apps` (`WorkloadProfiles` Consumption) | Serverless container hosting with managed HTTPS ingress, Log Analytics, and Azure Files volume support |
+| **Frontend Service (`tasbir-web`)** | Container App (`0.5 vCPU`, `1.0 GiB`, `min 0 / max 1`) | Multi-stage `node:20-alpine` image (`output: "standalone"`), built with `NEXT_PUBLIC_API_URL` targeting the live API |
+| **Backend Service (`tasbir-api`)** | Container App (`2.0 vCPU`, `4.0 GiB`, `min 0 / max 1`) | `python:3.11-slim` image with `SCRFD-10G` + `ArcFace` ONNX models pre-baked at build time for `<1s` startup |
+| **Container Registry** | `Azure Container Registry` (`Basic`) | Stores versioned `linux/amd64` Docker images built locally and pushed via [`deploy-azure.ps1`](deploy-azure.ps1) |
+| **Persistent Storage** | `Azure Storage` (`Standard_LRS`) + `Azure Files` (`5 GiB`) | Mounted at `/app/data` on `tasbir-api` so uploaded photos, WebP thumbnails, SQLite DB, and `.npy` vectors persist across restarts |
+
+### Key Cloud Engineering Details
+
+- **Pre-Baked ONNX Weights for Fast Cold Starts:** Both `det_10g.onnx` (`SCRFD-10G`, 16.9 MB) and `w600k_r50.onnx` (`ArcFace ResNet-50`, 174 MB) are downloaded during `backend/Dockerfile` build rather than at container boot—eliminating startup download latency so Uvicorn starts in under 1 second.
+- **SQLite Persistence over Azure Files (SMB/CIFS):** Azure Files SMB mounts reject POSIX `fcntl` byte-range locks used by default SQLite journaling (`OperationalError: database is locked`). In cloud mode (`TASBIR_SQLITE_NOLOCK=true`), `PhotoPoolStore` opens SQLite with URI `?nolock=1` and `PRAGMA journal_mode = MEMORY`, while serializing all writes through an in-process `threading.RLock` paired with `max-replicas: 1`. Embedding arrays (`.npy`) are persisted via temp-file atomic `replace`.
+- **Automatic HTTPS & WebRTC Unlock:** Azure Container Apps provisions managed TLS certificates automatically, enabling browser `getUserMedia` / `MediaRecorder` webcam capture on both desktop and mobile devices.
+- **Strict Cross-Origin Security:** `tasbir-api` dynamically parses `TASBIR_CORS_ORIGINS` (supporting comma-separated origins or JSON arrays) so only the deployed `tasbir-web` HTTPS origin (and local dev) can call the API.
+- **Repeatable Infrastructure Script:** All provisioning, Docker `linux/amd64` builds, ACR pushes, Azure Files volume YAML mounts, and CORS wiring are scripted in [`deploy-azure.ps1`](deploy-azure.ps1).
 
 ---
 
