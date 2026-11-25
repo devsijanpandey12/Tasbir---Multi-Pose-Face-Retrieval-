@@ -17,7 +17,7 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Tasbir — Multi-Angle Event & Group Photo Finder",
   description:
-    "Upload group or wedding photos once, then find every picture of yourself using 3 reference angles or a short head-turn video.",
+    "Upload event or group photos once, then find every picture of yourself using 3 reference angles or a short head-turn video.",
 };
 
 export default function RootLayout({

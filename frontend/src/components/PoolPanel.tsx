@@ -145,7 +145,7 @@ export default function PoolPanel({
               : "Step 1 · Upload Event or Group Photo Pool"}
           </h2>
           <p className="mt-1.5 text-xs leading-relaxed text-zinc-400">
-            Drag and drop wedding or group photos here. Each image is auto-oriented,
+            Drag and drop event or group photos here. Each image is auto-oriented,
             scanned by <span className="font-mono text-zinc-200">SCRFD-10G</span>, and
             indexed with <span className="font-mono text-zinc-200">ArcFace 512-D</span>{" "}
             vectors locally.
